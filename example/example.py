@@ -6,10 +6,10 @@ import h5py
 import matplotlib.pyplot as plt
 import os
 from astropy.table import Table
-import modules.cosmology as cos
-import modules.gas_properties as g_p
-import modules.halo_analysis as h_a
-import modules.prepare_pyatomdb as ppat
+import XIGrM.cosmology as cos
+import XIGrM.gas_properties as g_p
+import XIGrM.halo_analysis as h_a
+import XIGrM.prepare_pyatomdb as ppat
 
 # Load simulation snapshot
 data_file = 'data_file'
