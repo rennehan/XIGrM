@@ -106,7 +106,7 @@ class halo_props:
     group_list
         halo_id of the halo identified as group in the catalogue.
     '''
-    def __init__(self, halocatalogue, datatype, field=default_field, host_id_of_top_level=0):
+    def __init__(self, halocatalogue, datatype, field=default_field, host_id_of_top_level=0, verbose=True):
         '''
         Initialization routine.
 
@@ -130,14 +130,15 @@ class halo_props:
         init_zeros = np.zeros(self.length)
         self.host_id_of_top_level = host_id_of_top_level
         self.errorlist = [{}, {}, {}]
-
+        self.verbose = verbose
         self.rho_crit = pnb.analysis.cosmology.rho_crit(f=self.catalogue_original[1], unit='Msol kpc**-3')
         self.ovdens = cosmology.Delta_vir(self.catalogue_original[1])
 
         self.dict = []
         for j in range(self.length):
             i = j + 1
-            print('Loading properties... {:7} / {}'.format(i, self.length), end='\r')
+            if self.verbose:
+                print('Loading properties... {:7} / {}'.format(i, self.length), end='\r')
             prop = self.catalogue_original[i].properties
             hid = prop['halo_id']
             if i != hid:
@@ -222,6 +223,11 @@ class halo_props:
         rmax
             Maximum value for the shrinking sphere method. See 
             get_index() in calculate_R.py documentation for detail.
+
+        mpi_comm
+            In order to parallelize the code we need the communication
+            world. If mpi_comm is None, then we know we are not doing
+            a parallel operation.
         '''
         halo_id_list = np.array(halo_id_list, dtype=np.int).reshape(-1)
         if len(halo_id_list) == 0:
@@ -237,8 +243,9 @@ class halo_props:
         list_length = np.array(list(halo_id_list)).max()
         for j in halo_id_list:
             i = j - 1
-            print('Calculating radii and masses... {:7} / {}, time: \
-                        {:.5f}s'.format(j, list_length, t2 - t1), end='\r')
+            if self.verbose::
+                print('Calculating radii and masses... {:7} / {}, time: \
+                            {:.5f}s'.format(j, list_length, t2 - t1), end='\r')
             prop = self.dict[i]
             t1 = time.time()
             MassRadii = cR.get_radius(self.new_catalogue[j], \
@@ -274,7 +281,8 @@ class halo_props:
         list_length = np.array(list(halo_id_list)).max()
         for j in halo_id_list:
             i = j - 1
-            print('Calculating specific masses... {:7} / {}'.format(j, list_length), end='\r')
+            if self.verbose:
+                print('Calculating specific masses... {:7} / {}'.format(j, list_length), end='\r')
             prop = self.dict[i]
             center = self.center[i]
             halo = self.new_catalogue[j]
@@ -332,8 +340,9 @@ class halo_props:
         list_length = np.array(list(halo_id_list)).max()
         for j in halo_id_list:
             i = j - 1
-            print('Calculating temperatures and luminosities... {:7} / {}'\
-                            .format(j, list_length), end='\r')
+            if self.verbose:
+                print('Calculating temperatures and luminosities... {:7} / {}'\
+                                .format(j, list_length), end='\r')
             center = self.center[i]
             halo = self.new_catalogue[j]
             R = self.prop['R'][i:i+1][calcu_field].in_units('kpc')
@@ -399,8 +408,9 @@ class halo_props:
         list_length = np.array(list(halo_id_list)).max()
         for j in halo_id_list:
             i = j - 1
-            print('            Calculating entropies... {:7} / {}'\
-                            .format(j, list_length), end='\r')
+            if self.verbose:
+                print('            Calculating entropies... {:7} / {}'\
+                                .format(j, list_length), end='\r')
             center = self.center[i]
             halo = self.new_catalogue[j]
             tx = pnb.transformation.inverse_translate(halo, center)
@@ -467,7 +477,8 @@ class halo_props:
         self.children = [set() for _ in range(self.length)]
         for i in range(self.length):
             j = self.haloid[i]#j = i + 1
-            print('Generating children list... Halo: {:7} / {}'.format(j, self.length), end='\r')
+            if self.verbose:
+                print('Generating children list... Halo: {:7} / {}'.format(j, self.length), end='\r')
             prop = self.dict[i]
             hostID = prop['hostHalo']
             if j in self.errorlist[0]:
@@ -509,7 +520,8 @@ class halo_props:
             self.new_catalogue = {}
             for i in range(self.length):
                 j = self.haloid[i]
-                print('Generating new catalogue... Halo: {:7} / {}'.format(j, self.length), end='\r')
+                if self.verbose:
+                    print('Generating new catalogue... Halo: {:7} / {}'.format(j, self.length), end='\r')
                 if len(self.children[i]) == 0:
                     self.new_catalogue[j] = self.catalogue_original[j]
                 else:
@@ -519,7 +531,7 @@ class halo_props:
             self.new_catalogue = self.catalogue_original
         self._have_new_catalogue = True
 
-    def get_galaxy(self, g_low_limit):
+    def get_galaxy(self, g_low_limit, halo_indices=None):
         '''
         Generate list of galaxies for each host halo. The subsubhalo 
         will also be included in the hosthalo galaxy list. And it won't 
@@ -535,18 +547,25 @@ class halo_props:
             raise Exception('Must get_children first!')
         if not self._have_new_catalogue:
             raise Exception('Must get_new_catalogue first!')
+        if halo_indices is None:
+            iterator = range(self.length)
+        else:
+            iterator = halo_indices
+
+        length_this = len(iterator)
 
         self.galaxy_list = [] # List of all galaxies (as long as n_star > 0).
         self.lumi_galaxy_list = [] # List of all luminous galaxies (self_m_star > galaxy_low_limit).
-        self.galaxies = [set() for _ in range(self.length)]
-        self.lumi_galaxies = [set() for _ in range(self.length)]
+        self.galaxies = [set() for _ in iterator]
+        self.lumi_galaxies = [set() for _ in iterator]
         self.n_lgal = np.zeros(self.length) # Number of total luminous galaxies embedded in each host halo.
         # The galaxies within subhalos (i.e., subhalos themselves) will also be taken into account.
         
 
-        for i in range(self.length):
+        for n, i in enumerate(iterator):
             j = self.haloid[i]
-            print('Calculating total stellar masses... Halo: {:7} / {}'.format(j, self.length), end='\r')
+            if self.verbose:
+                print('Calculating total stellar masses... Halo: {:7} / {}'.format(n, length_this), end='\r')
             self.prop['M']['total_star'][i] = self.new_catalogue[j].star['mass'].sum()
             #sf_gas = self.new_catalogue[j].gas[pnb.filt.LowPass('temp', '3e4 K')]
             # sf_gas = self.new_catalogue[j].gas[pnb.filt.HighPass('nh', '0.13 cm**-3')]
@@ -554,9 +573,10 @@ class halo_props:
             # sf_gas, i.e., star forming gas, is used in the definition of resolved galaxies in Liang's Figure2.
             # But seems that Liang didn't plot Figure 2 using the concept of resolved galaxies.
         low_limit = g_low_limit.in_units(self.prop['M']['total_star'].units)
-        for i in range(self.length):
+        for n, i in enumerate(iterator):
             j = self.haloid[i]
-            print('            Identifying galaxies... Halo: {:7} / {}'.format(j, self.length), end='\r')
+            if self.verbose:
+                print('            Identifying galaxies... Halo: {:7} / {}'.format(n, length_this), end='\r')
             children_list = np.array(list(self.children[i]))
             if len(children_list) == 0:
                 self_Mstar = self.prop['M']['total_star'][i]
@@ -632,8 +652,9 @@ class halo_props:
         list_length = np.array(list(halo_id_list)).max()
         for j in halo_id_list:
             i = j - 1
-            print('Calculating temperatures and luminosities... {:7} / {}'\
-                            .format(j, list_length), end='\r')
+            if self.verbose:
+                print('Calculating temperatures and luminosities... {:7} / {}'\
+                                .format(j, list_length), end='\r')
             center = self.center[i]
             halo = self.new_catalogue[j]
             R = self.prop['R'][i:i+1][calcu_field].in_units('kpc')
@@ -691,8 +712,9 @@ class halo_props:
         list_length = np.array(list(halo_id_list)).max()
         for j in halo_id_list:
             i = j - 1
-            print('Calculating spectroscopic temperatures... {:7} / {}'\
-                            .format(j, list_length), end='\r')
+            if self.verbose:
+                print('Calculating spectroscopic temperatures... {:7} / {}'\
+                                .format(j, list_length), end='\r')
             center = self.center[i]
             halo = self.new_catalogue[j]
             R = self.prop['R'][i:i+1][calcu_field].in_units('kpc')
@@ -740,7 +762,8 @@ class halo_props:
                 center_mode = 'com'
             for i in range(self.length):
                 j = self.haloid[i]
-                print('Calculating center... {:7} / {}'.format(j, self.length), end='\r')
+                if self.verbose:
+                    print('Calculating center... {:7} / {}'.format(j, self.length), end='\r')
                 self.center[i] = pnb.analysis.halo.center(self.new_catalogue[j], mode=center_mode, retcen=True, vel=False)
         self._have_center = True
     
