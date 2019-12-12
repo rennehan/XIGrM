@@ -454,8 +454,12 @@ class halo_props:
         with h5py.File(filename, "w") as f:
             dataset = f.create_dataset("halo_id", data = halo_id_list)
             dataset.attrs['Description'] = 'halo_ids of halos saved in this file.'
-            dataset2 = f.create_dataset("N_lgal", data = self.n_lgal[halo_id_list - 1])
-            dataset2.attrs['Description'] = 'Number of luminous galaxies'
+            try:
+                dataset2 = f.create_dataset("N_lgal", data = self.n_lgal[halo_id_list - 1])
+                dataset2.attrs['Description'] = 'Number of luminous galaxies'
+            except AttributeError:
+                print('N_lgal will not be saved in this dataset.')
+
             for attr in field:
                 grp = f.create_group(attr)
                 infos = field[attr]
